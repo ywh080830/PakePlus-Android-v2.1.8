@@ -825,6 +825,31 @@
             padding: 0 4px;
         }
 
+        /* 消息操作按钮 */
+        .message-action-btn {
+            width: 24px;
+            height: 24px;
+            border: none;
+            background: var(--surface-hover);
+            border-radius: 6px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.2s ease;
+            color: var(--text-secondary);
+        }
+
+        .message-action-btn:hover {
+            background: var(--primary);
+            color: white;
+            transform: scale(1.1);
+        }
+
+        .message-action-btn:active {
+            transform: scale(0.95);
+        }
+
         .message.user .message-time {
             text-align: right;
         }
@@ -1733,17 +1758,17 @@
                             onkeydown="handleKeyDown(event)"
                         ></textarea>
                         <div class="input-actions">
-                            <button class="input-btn">
-                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                    <path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48"/>
-                                </svg>
-                            </button>
-                            <button class="input-btn">
+                            <button class="input-btn" onclick="toggleVoiceInput()" id="voiceInputBtn">
                                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                     <path d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z"/>
                                     <path d="M19 10v2a7 7 0 01-14 0v-2"/>
                                     <line x1="12" y1="19" x2="12" y2="23"/>
                                     <line x1="8" y1="23" x2="16" y2="23"/>
+                                </svg>
+                            </button>
+                            <button class="input-btn" onclick="showQuickReplies()">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/>
                                 </svg>
                             </button>
                             <button class="input-btn send-btn" onclick="sendMessage()">
@@ -2027,6 +2052,14 @@
                     <div class="setting-item">
                         <div class="setting-label">清空输入</div>
                         <div class="setting-value">Esc</div>
+                    </div>
+                </div>
+                
+                <div class="settings-section">
+                    <div class="settings-section-title">收藏夹</div>
+                    <div class="setting-item">
+                        <div class="setting-label">查看收藏</div>
+                        <button class="update-btn" onclick="showFavorites()">查看</button>
                     </div>
                 </div>
                 
@@ -2355,12 +2388,12 @@
 
         function getTypewriterSpeed() {
             const speeds = {
-                'fast': 10,
-                'normal': 30,
-                'slow': 50,
-                'veryslow': 80
+                'fast': 5,  // 加快速度到5ms
+                'normal': 20,  // 加快到20ms
+                'slow': 30,  // 加快到30ms
+                'veryslow': 50  // 加快到50ms
             };
-            const saved = localStorage.getItem('typewriterSpeed') || 'normal';
+            const saved = localStorage.getItem('typewriterSpeed') || 'fast';  // 默认设为快速
             return speeds[saved];
         }
 
@@ -2436,26 +2469,416 @@
 
         if ('visualViewport' in window) {
             const viewport = window.visualViewport;
+            const inputArea = document.querySelector('.chat-input-area');
             
             viewport.addEventListener('resize', function() {
-                if (viewport.height < window.innerHeight * 0.8) {
-                    document.querySelector('.chat-input-area').style.transform = 'translateY(0)';
+                const heightDiff = window.innerHeight - viewport.height;
+                if (heightDiff > 100) {
+                    // 输入法弹出
+                    inputArea.style.transform = `translateY(-${heightDiff}px)`;
+                    inputArea.style.bottom = `${heightDiff}px`;
                 } else {
-                    document.querySelector('.chat-input-area').style.transform = '';
+                    // 输入法收起
+                    inputArea.style.transform = '';
+                    inputArea.style.bottom = '0';
                 }
             });
         }
+
+        // 适配华为和OPPO手机
+        window.addEventListener('resize', function() {
+            const inputArea = document.querySelector('.chat-input-area');
+            if (window.innerWidth <= 768) {
+                const heightDiff = window.innerHeight - window.visualViewport.height;
+                if (heightDiff > 100) {
+                    inputArea.style.transform = `translateY(-${heightDiff}px)`;
+                    inputArea.style.bottom = `${heightDiff}px`;
+                } else {
+                    inputArea.style.transform = '';
+                    inputArea.style.bottom = '0';
+                }
+            }
+        });
 
         chatInput.addEventListener('focus', function() {
             if (window.innerWidth <= 768) {
                 setTimeout(() => {
                     chatMessages.scrollTop = chatMessages.scrollHeight;
+                    
+                    // 适配华为和OPPO手机输入法
+                    const heightDiff = window.innerHeight - window.visualViewport.height;
+                    const inputArea = document.querySelector('.chat-input-area');
+                    if (heightDiff > 100) {
+                        inputArea.style.transform = `translateY(-${heightDiff}px)`;
+                        inputArea.style.bottom = `${heightDiff}px`;
+                    }
                 }, 300);
             }
         });
 
         function isMobile() {
             return window.innerWidth <= 768 || /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+        }
+
+        // 语音输入功能
+        let recognition = null;
+        let isRecording = false;
+        let recordingStartTime = 0;
+
+        function toggleVoiceInput() {
+            if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
+                addMessage('system', '⚠️ 您的浏览器不支持语音输入功能');
+                return;
+            }
+
+            if (isRecording) {
+                stopVoiceInput();
+            } else {
+                startVoiceInput();
+            }
+        }
+
+        function startVoiceInput() {
+            const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+            recognition = new SpeechRecognition();
+            recognition.lang = 'zh-CN';
+            recognition.continuous = false;
+            recognition.interimResults = true;
+            recognition.maxAlternatives = 1;
+
+            recordingStartTime = Date.now();
+            isRecording = true;
+            
+            // 添加录音动画
+            const voiceBtn = document.getElementById('voiceInputBtn');
+            voiceBtn.style.backgroundColor = 'rgba(239, 68, 68, 0.1)';
+            voiceBtn.style.color = '#ef4444';
+            voiceBtn.style.animation = 'pulse 1.5s infinite';
+            
+            // 显示波浪动画
+            showVoiceWave();
+            
+            addMessage('system', '🎤 正在聆听...');
+
+            recognition.onstart = function() {
+                if (isMobile()) {
+                    vibrate(20);
+                }
+            };
+
+            recognition.onresult = function(event) {
+                let transcript = '';
+                let isFinal = false;
+                
+                for (let i = event.resultIndex; i < event.results.length; i++) {
+                    transcript += event.results[i][0].transcript;
+                    if (event.results[i].isFinal) {
+                        isFinal = true;
+                    }
+                }
+                
+                document.getElementById('chatInput').value = transcript;
+                document.getElementById('chatInput').style.height = 'auto';
+                document.getElementById('chatInput').style.height = Math.min(document.getElementById('chatInput').scrollHeight, 120) + 'px';
+                
+                if (isFinal) {
+                    // 显示最终识别结果
+                    addMessage('system', `🎯 识别结果: ${transcript}`);
+                }
+            };
+
+            recognition.onerror = function(event) {
+                stopVoiceInput();
+                let errorMessage = '语音识别出错';
+                
+                switch (event.error) {
+                    case 'no-speech':
+                        errorMessage = '未检测到语音';
+                        break;
+                    case 'audio-capture':
+                        errorMessage = '无法访问麦克风';
+                        break;
+                    case 'not-allowed':
+                        errorMessage = '麦克风权限被拒绝';
+                        break;
+                    case 'network':
+                        errorMessage = '网络错误';
+                        break;
+                }
+                
+                addMessage('system', `⚠️ ${errorMessage}`);
+                console.error('语音识别错误:', event.error);
+            };
+
+            // 添加录音时长显示
+            const durationInterval = setInterval(() => {
+                if (isRecording) {
+                    const duration = Math.round((Date.now() - recordingStartTime) / 1000);
+                    // 可以在这里添加时长显示
+                }
+            }, 1000);
+
+            recognition.onend = function() {
+                clearInterval(durationInterval);
+                stopVoiceInput();
+                const duration = Math.round((Date.now() - recordingStartTime) / 1000);
+                
+                if (document.getElementById('chatInput').value.trim()) {
+                    addMessage('system', `⏱️ 语音输入完成 (${duration}秒)`);
+                    setTimeout(() => {
+                        sendMessage();
+                    }, 300);
+                } else {
+                    addMessage('system', '🔇 未检测到语音输入');
+                }
+            };
+
+            recognition.start();
+        }
+
+        function stopVoiceInput() {
+            if (recognition) {
+                recognition.stop();
+                recognition = null;
+            }
+            
+            isRecording = false;
+            const voiceBtn = document.getElementById('voiceInputBtn');
+            voiceBtn.style.backgroundColor = '';
+            voiceBtn.style.color = '';
+            voiceBtn.style.animation = '';
+            
+            // 隐藏波浪动画
+            hideVoiceWave();
+        }
+
+        // 显示波浪动画
+        function showVoiceWave() {
+            // 先移除已有的波浪动画
+            hideVoiceWave();
+            
+            const waveContainer = document.createElement('div');
+            waveContainer.className = 'voice-wave';
+            waveContainer.innerHTML = `
+                <div class="wave-bar"></div>
+                <div class="wave-bar"></div>
+                <div class="wave-bar"></div>
+                <div class="wave-bar"></div>
+                <div class="wave-bar"></div>
+            `;
+            
+            document.body.appendChild(waveContainer);
+        }
+
+        // 隐藏波浪动画
+        function hideVoiceWave() {
+            const waveContainer = document.querySelector('.voice-wave');
+            if (waveContainer) {
+                waveContainer.remove();
+            }
+        }
+
+        // 消息操作功能
+        function copyMessage(messageId) {
+            const messageDiv = document.getElementById(messageId);
+            if (messageDiv) {
+                const bubble = messageDiv.querySelector('.message-bubble');
+                if (bubble) {
+                    const text = bubble.textContent || bubble.innerText;
+                    navigator.clipboard.writeText(text).then(() => {
+                        addMessage('system', '✅ 消息已复制到剪贴板');
+                        if (isMobile()) {
+                            vibrate(10);
+                        }
+                    }).catch(err => {
+                        addMessage('system', '❌ 复制失败，请手动复制');
+                        console.error('复制失败:', err);
+                    });
+                }
+            }
+        }
+
+        function favoriteMessage(messageId) {
+            const messageDiv = document.getElementById(messageId);
+            if (messageDiv) {
+                const bubble = messageDiv.querySelector('.message-bubble');
+                if (bubble) {
+                    const text = bubble.textContent || bubble.innerText;
+                    const favorites = JSON.parse(localStorage.getItem('favorites') || '[]');
+                    
+                    const existingIndex = favorites.findIndex(item => item.id === messageId);
+                    if (existingIndex > -1) {
+                        favorites.splice(existingIndex, 1);
+                        addMessage('system', '❤️ 已取消收藏');
+                    } else {
+                        favorites.push({
+                            id: messageId,
+                            content: text,
+                            time: getCurrentTime(),
+                            model: model.name
+                        });
+                        addMessage('system', '❤️ 消息已收藏');
+                    }
+                    
+                    localStorage.setItem('favorites', JSON.stringify(favorites));
+                    if (isMobile()) {
+                        vibrate(10);
+                    }
+                }
+            }
+        }
+
+        function shareMessage(messageId) {
+            const messageDiv = document.getElementById(messageId);
+            if (messageDiv) {
+                const bubble = messageDiv.querySelector('.message-bubble');
+                if (bubble) {
+                    const text = bubble.textContent || bubble.innerText;
+                    
+                    if (navigator.share) {
+                        navigator.share({
+                            title: '来自元答的AI回复',
+                            text: text,
+                            url: window.location.href
+                        }).then(() => {
+                            addMessage('system', '📤 分享成功');
+                        }).catch(err => {
+                            console.error('分享失败:', err);
+                            fallbackShare(text);
+                        });
+                    } else {
+                        fallbackShare(text);
+                    }
+                }
+            }
+        }
+
+        function fallbackShare(text) {
+            const shareText = `来自元答的AI回复: ${text}`;
+            navigator.clipboard.writeText(shareText).then(() => {
+                addMessage('system', '📋 内容已复制，请手动分享');
+                if (isMobile()) {
+                    vibrate(10);
+                }
+            }).catch(err => {
+                addMessage('system', '❌ 分享失败');
+                console.error('分享失败:', err);
+            });
+        }
+
+        // 添加录音动画样式
+        const style = document.createElement('style');
+        style.textContent = `
+            @keyframes pulse {
+                0% {
+                    transform: scale(1);
+                    box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.4);
+                }
+                70% {
+                    transform: scale(1.05);
+                    box-shadow: 0 0 0 10px rgba(239, 68, 68, 0);
+                }
+                100% {
+                    transform: scale(1);
+                    box-shadow: 0 0 0 0 rgba(239, 68, 68, 0);
+                }
+            }
+            
+            /* 波浪动画 */
+            .voice-wave {
+                position: absolute;
+                bottom: 70px;
+                left: 50%;
+                transform: translateX(-50%);
+                display: flex;
+                align-items: flex-end;
+                gap: 4px;
+                padding: 10px;
+                background: rgba(0, 0, 0, 0.1);
+                border-radius: 20px;
+                z-index: 15;
+            }
+            
+            .wave-bar {
+                width: 4px;
+                height: 20px;
+                background: var(--primary);
+                border-radius: 2px;
+                animation: wave 1.2s infinite ease-in-out;
+            }
+            
+            .wave-bar:nth-child(2) {
+                animation-delay: 0.1s;
+            }
+            
+            .wave-bar:nth-child(3) {
+                animation-delay: 0.2s;
+            }
+            
+            .wave-bar:nth-child(4) {
+                animation-delay: 0.3s;
+            }
+            
+            .wave-bar:nth-child(5) {
+                animation-delay: 0.4s;
+            }
+            
+            @keyframes wave {
+                0%, 100% {
+                    height: 5px;
+                }
+                50% {
+                    height: 20px;
+                }
+            }
+        `;
+        document.head.appendChild(style);
+
+        // 快捷回复功能
+        function showQuickReplies() {
+            if (isMobile()) {
+                const quickReplies = [
+                    '你好，今天天气怎么样？',
+                    '帮我写一篇作文',
+                    '解释一下量子力学',
+                    '如何学习编程？',
+                    '讲一个笑话',
+                    '翻译这句话：Hello world'
+                ];
+
+                let quickRepliesHTML = '<div style="position: fixed; bottom: 100px; left: 16px; right: 16px; background: var(--surface); border-radius: 16px; padding: 16px; box-shadow: var(--shadow-lg); z-index: 20;">';
+                quickRepliesHTML += '<div style="font-size: 14px; font-weight: 600; margin-bottom: 12px; color: var(--text-primary);">快捷回复</div>';
+                quickRepliesHTML += '<div style="display: flex; flex-wrap: wrap; gap: 8px;">';
+                
+                quickReplies.forEach(reply => {
+                    quickRepliesHTML += `<button onclick="useQuickReply('${reply}')" style="padding: 8px 12px; background: var(--surface-hover); border: 1px solid var(--border); border-radius: 20px; font-size: 13px; color: var(--text-secondary); cursor: pointer; transition: all 0.2s ease;">${reply}</button>`;
+                });
+                
+                quickRepliesHTML += '</div>';
+                quickRepliesHTML += '<button onclick="this.parentElement.remove()" style="margin-top: 12px; padding: 8px; background: none; border: none; font-size: 12px; color: var(--text-muted); cursor: pointer; width: 100%; text-align: center;">关闭</button>';
+                quickRepliesHTML += '</div>';
+
+                const quickRepliesElement = document.createElement('div');
+                quickRepliesElement.innerHTML = quickRepliesHTML;
+                document.body.appendChild(quickRepliesElement);
+            }
+        }
+
+        function useQuickReply(text) {
+            document.getElementById('chatInput').value = text;
+            document.getElementById('chatInput').style.height = 'auto';
+            document.getElementById('chatInput').style.height = Math.min(document.getElementById('chatInput').scrollHeight, 120) + 'px';
+            
+            // 关闭快捷回复面板
+            const quickPanel = document.querySelector('div[style*="position: fixed; bottom: 100px;"]');
+            if (quickPanel) {
+                quickPanel.remove();
+            }
+            
+            // 自动发送
+            setTimeout(() => {
+                sendMessage();
+            }, 300);
         }
 
         function vibrate(duration = 10) {
@@ -2536,9 +2959,27 @@
             const messageDiv = document.createElement('div');
             messageDiv.className = `message ${role}`;
             
-            const avatar = role === 'user' 
-                ? '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>'
-                : `<img src="${icon}" alt="AI" style="width:24px;height:24px;border-radius:6px;">`;
+            let avatar = '';
+            if (role === 'user') {
+                avatar = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>';
+            } else if (role === 'assistant') {
+                avatar = `<img src="${icon}" alt="AI" style="width:24px;height:24px;border-radius:6px;">`;
+            } else if (role === 'system') {
+                messageDiv.className = 'message system';
+                messageDiv.innerHTML = `
+                    <div class="message-content" style="text-align: center; width: 100%;">
+                        <div class="message-bubble" style="display: inline-block; background: var(--surface-hover); color: var(--text-secondary); font-size: 12px; padding: 6px 12px; border-radius: 12px; max-width: 80%;">
+                            ${content}
+                        </div>
+                        <div class="message-time">${getCurrentTime()}</div>
+                    </div>
+                `;
+                chatMessages.appendChild(messageDiv);
+                if (shouldAutoScroll()) {
+                    chatMessages.scrollTop = chatMessages.scrollHeight;
+                }
+                return;
+            }
             
             const fontSize = localStorage.getItem('fontSize') || 'medium';
             const fontSizes = {
@@ -2548,13 +2989,48 @@
                 'xlarge': '19px'
             };
             
+            const messageId = Date.now() + Math.random().toString(36).substr(2, 9);
+            
             messageDiv.innerHTML = `
                 <div class="message-avatar">${avatar}</div>
                 <div class="message-content">
                     <div class="message-bubble" style="font-size: ${fontSizes[fontSize]}; ${content.includes('<img') ? 'padding: 12px 0;' : ''}">${content}</div>
+                    <div class="message-actions" style="display: flex; gap: 8px; margin-top: 8px; opacity: 0; transition: opacity 0.2s ease;">
+                        <button class="message-action-btn" onclick="copyMessage('${messageId}')" title="复制">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14">
+                                <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                                <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                            </svg>
+                        </button>
+                        <button class="message-action-btn" onclick="favoriteMessage('${messageId}')" title="收藏">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14">
+                                <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"></path>
+                            </svg>
+                        </button>
+                        <button class="message-action-btn" onclick="shareMessage('${messageId}')" title="分享">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14">
+                                <path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"></path>
+                                <polyline points="16 6 12 2 8 6"></polyline>
+                                <line x1="12" y1="2" x2="12" y2="15"></line>
+                            </svg>
+                        </button>
+                    </div>
                     <div class="message-time">${getCurrentTime()}</div>
                 </div>
             `;
+            
+            messageDiv.id = messageId;
+            
+            // 添加鼠标悬停效果
+            messageDiv.addEventListener('mouseenter', function() {
+                const actions = this.querySelector('.message-actions');
+                if (actions) actions.style.opacity = '1';
+            });
+            
+            messageDiv.addEventListener('mouseleave', function() {
+                const actions = this.querySelector('.message-actions');
+                if (actions) actions.style.opacity = '0';
+            });
             
             chatMessages.appendChild(messageDiv);
             if (shouldAutoScroll()) {
@@ -2638,12 +3114,10 @@
                     history: []
                 });
                 
-                const maxHistory = localStorage.getItem('maxHistory');
-                if (maxHistory && maxHistory !== 'unlimited') {
-                    const max = parseInt(maxHistory);
-                    if (conversations[currentModelId].length > max) {
-                        conversations[currentModelId] = conversations[currentModelId].slice(-max);
-                    }
+                // 每个模型最多保留30条历史对话
+                const MAX_CONVERSATIONS_PER_MODEL = 30;
+                if (conversations[currentModelId].length > MAX_CONVERSATIONS_PER_MODEL) {
+                    conversations[currentModelId] = conversations[currentModelId].slice(-MAX_CONVERSATIONS_PER_MODEL);
                 }
                 
                 updateHistoryList();
@@ -3109,6 +3583,54 @@
 
         function checkUpdate() {
             alert('当前已是最新版本 v1.0');
+        }
+
+        // 显示收藏夹
+        function showFavorites() {
+            const favorites = JSON.parse(localStorage.getItem('favorites') || '[]');
+            
+            if (favorites.length === 0) {
+                addMessage('system', '📂 收藏夹为空');
+                return;
+            }
+            
+            let favoritesHTML = '<div style="position: fixed; top: 100px; left: 16px; right: 16px; bottom: 100px; background: var(--surface); border-radius: 16px; padding: 16px; box-shadow: var(--shadow-lg); z-index: 20; overflow-y: auto;">';
+            favoritesHTML += '<div style="font-size: 16px; font-weight: 600; margin-bottom: 16px; color: var(--text-primary); display: flex; justify-content: space-between; align-items: center;">';
+            favoritesHTML += '<span>收藏夹</span>';
+            favoritesHTML += '<button onclick="this.parentElement.parentElement.remove()" style="padding: 6px 12px; background: var(--surface-hover); border: 1px solid var(--border); border-radius: 8px; font-size: 12px; color: var(--text-secondary); cursor: pointer;">关闭</button>';
+            favoritesHTML += '</div>';
+            
+            favorites.forEach((item, index) => {
+                favoritesHTML += `<div style="padding: 12px; background: var(--surface-hover); border-radius: 12px; margin-bottom: 12px; border: 1px solid var(--border);">`;
+                favoritesHTML += `<div style="font-size: 12px; color: var(--text-muted); margin-bottom: 8px;">${item.time} · ${item.model}</div>`;
+                favoritesHTML += `<div style="font-size: 14px; color: var(--text-primary); line-height: 1.5; margin-bottom: 8px; word-wrap: break-word;">${item.content}</div>`;
+                favoritesHTML += `<div style="display: flex; gap: 8px; justify-content: flex-end;">`;
+                favoritesHTML += `<button onclick="copyMessage('${item.id}')" style="padding: 4px 8px; background: var(--surface); border: 1px solid var(--border); border-radius: 6px; font-size: 12px; color: var(--text-secondary); cursor: pointer;">复制</button>`;
+                favoritesHTML += `<button onclick="removeFavorite(${index})" style="padding: 4px 8px; background: var(--surface); border: 1px solid var(--border); border-radius: 6px; font-size: 12px; color: var(--text-secondary); cursor: pointer;">删除</button>`;
+                favoritesHTML += `</div>`;
+                favoritesHTML += `</div>`;
+            });
+            
+            favoritesHTML += '</div>';
+            
+            const favoritesElement = document.createElement('div');
+            favoritesElement.innerHTML = favoritesHTML;
+            document.body.appendChild(favoritesElement);
+        }
+
+        // 移除收藏
+        function removeFavorite(index) {
+            const favorites = JSON.parse(localStorage.getItem('favorites') || '[]');
+            favorites.splice(index, 1);
+            localStorage.setItem('favorites', JSON.stringify(favorites));
+            addMessage('system', '❤️ 已从收藏夹移除');
+            
+            // 重新显示收藏夹
+            const favoritesPanel = document.querySelector('div[style*="position: fixed; top: 100px;"]');
+            if (favoritesPanel) {
+                favoritesPanel.remove();
+                showFavorites();
+            }
         }
 
         function updateStatistics() {
